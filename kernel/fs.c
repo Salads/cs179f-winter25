@@ -482,6 +482,38 @@ itrunc(struct inode *ip)
     ip->addrs[NDIRECT] = 0;
   }
 
+  // NOTE(Darrell): Clear double-indirect blocks
+  if(ip->addrs[NDIRECT+1])
+  {
+    // NOTE(Darrell): Read root of double-indirect
+    bp = bread(ip->dev, ip->addrs[NDIRECT+1]);
+    a = (uint*)bp->data;
+    for(j = 0; j < NINDIRECT; j++)
+    {
+      if(a[j])
+      {
+        // NOTE(Darrell): Clear 2nd-layer blocks
+        struct buf *buf2 = bread(ip->dev, ip->addrs[NDIRECT]);
+        uint *data2 = (uint*)bp->data;
+        for(int k = 0; k < NINDIRECT; ++k)
+        {
+          if(data2[k])
+          {
+            bfree(ip->dev, data2[k]);
+          }
+        }
+
+        brelse(buf2);
+        bfree(ip->dev, a[j]); // NOTE(Darrell): Free 1st-layer node
+      }
+    }
+
+    brelse(bp);
+    bfree(ip->dev, ip->addrs[NDIRECT+1]); // NOTE(Darrell): finally free 0-layer
+
+    ip->addrs[NDIRECT] = 0;
+  }
+
   ip->size = 0;
   iupdate(ip);
 }
