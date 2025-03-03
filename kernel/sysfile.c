@@ -286,8 +286,43 @@ create(char *path, short type, short major, short minor)
 uint64
 sys_symlink(void)
 {
-  //your implementation goes here
-  return 0;
+  // (const char *target, const char *path)
+  char argTarget[MAXPATH] = {0};
+  char argPath[MAXPATH] = {0};
+
+  if(argstr(0, argTarget, MAXPATH) < 0 || argstr(1, argPath, MAXPATH) < 0)
+  {
+    return -1;
+  }
+
+  int argTargetLen = strlen(argTarget);
+
+  begin_op(ROOTDEV);
+  
+  struct inode *newInode = create(argPath, T_SYMLINK, 0, 0);
+  if(!newInode)
+  {
+    // NOTE(Darrell): Could not create new inode. We're all gonna die!!!
+    end_op(ROOTDEV);
+    return -1;
+  }
+
+  // NOTE(Darrell): Write to inode - 
+
+  // writei(struct inode *ip, int user_src, uint64 src, uint off, uint n)
+  // seriously, why not just specify var names in the function decl?? animals!
+
+  // NOTE(Darrell): Write size of target
+  writei(newInode, 0, (uint64)&argTargetLen, 0, sizeof(int));
+
+  // NOTE(Darrell): Write target to inode right after! (current binary format 4b(targetlen)|tlenb+1(target))
+  writei(newInode, 0, (uint64)argTarget, sizeof(int), argTargetLen + 1); 
+
+  iupdate(newInode); // Update disk version from this in-memory version
+  iunlockput(newInode); // Drop ref for inode
+
+  end_op(ROOTDEV);
+  return 0; // NOTE(Darrell) 0 = success
 }
 
 uint64
@@ -302,21 +337,38 @@ sys_open(void)
   if((n = argstr(0, path, MAXPATH)) < 0 || argint(1, &omode) < 0)
     return -1;
 
+  /*
+    O_FOLLOW: Just open the file ( no code change? )
+
+    else:
+      - Fail if target doesn't exist
+      - If target is symbolic link, follow until it is not.
+      - Detect if links form cycle, and error out. Cheap (but stupid) way is depth>10
+      - 
+  */
+
   begin_op(ROOTDEV);
 
-  if(omode & O_CREATE){
+  if(omode & O_CREATE)
+  {
     ip = create(path, T_FILE, 0, 0);
     if(ip == 0){
       end_op(ROOTDEV);
       return -1;
     }
-  } else {
-    if((ip = namei(path)) == 0){
+  } 
+  else 
+  {
+    if((ip = namei(path)) == 0)
+    {
       end_op(ROOTDEV);
       return -1;
     }
+
     ilock(ip);
-    if(ip->type == T_DIR && omode != O_RDONLY){
+    
+    if(ip->type == T_DIR && omode != O_RDONLY)
+    {
       iunlockput(ip);
       end_op(ROOTDEV);
       return -1;
@@ -335,6 +387,50 @@ sys_open(void)
     iunlockput(ip);
     end_op(ROOTDEV);
     return -1;
+  }
+
+  // NOTE(Darrell): By now, we should have an inode (created or opened)
+  // The only operation is setting the correct inode! (follow if needed)
+  if ((ip->type == T_SYMLINK) && !(omode & O_NOFOLLOW))
+  {
+    /*
+      NOTE(Darrell): Recall our encoding for symlinks
+        - 4 bytes: str len
+        - str len bytes: target path str
+    */
+
+    int nFollows = 0;
+    while (ip->type == T_SYMLINK && nFollows < 10) 
+    {
+      int targetStrLen = 0;
+      readi(ip, 0, (uint64)&targetStrLen, 0, sizeof(int));
+    
+      if(targetStrLen > MAXPATH)
+      {
+        panic("open: corrupted symlink inode");
+      }
+    
+      // NOTE(Darrell): Read new path from inode at +4b offset
+      readi(ip, 0, (uint64)path, sizeof(int), targetStrLen + 1);
+      iunlockput(ip);
+      
+      if((ip = namei(path)) == 0) // NOTE(Darrell): Set new ip, guard against empty inode.
+      {
+        end_op(ROOTDEV);
+        return -1;
+      }
+
+      ilock(ip);
+      nFollows++;
+    }
+
+    if (nFollows >= 10) 
+    {
+      printf("open: symlink cycle detected!\n");
+      iunlockput(ip);
+      end_op(ROOTDEV);
+      return -1;
+    }
   }
 
   if(ip->type == T_DEVICE){
