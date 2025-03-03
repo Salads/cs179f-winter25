@@ -376,29 +376,75 @@ iunlockput(struct inode *ip)
 // Return the disk block address of the nth block in inode ip.
 // If there is no such block, bmap allocates one.
 static uint
-bmap(struct inode *ip, uint bn)
+bmap(struct inode *ip, uint logicalBlockNumber)
 {
-  uint addr, *a;
-  struct buf *bp;
+  uint addr, *diskData;
+  struct buf *diskBuffer;
 
-  if(bn < NDIRECT){
-    if((addr = ip->addrs[bn]) == 0)
-      ip->addrs[bn] = addr = balloc(ip->dev);
+  if(logicalBlockNumber < NDIRECT)
+  {
+    if((addr = ip->addrs[logicalBlockNumber]) == 0)
+    {
+      ip->addrs[logicalBlockNumber] = addr = balloc(ip->dev);
+    }
+
     return addr;
   }
-  bn -= NDIRECT;
+  logicalBlockNumber -= NDIRECT;
 
-  if(bn < NINDIRECT){
-    // Load indirect block, allocating if necessary.
-    if((addr = ip->addrs[NDIRECT]) == 0)
+  // NOTE(Darrell): Loop through single-indirect blocks
+  if(logicalBlockNumber < NINDIRECT)
+  {
+    // NOTE(Darrell): Make sure the single-indirect root node is not allocated
+    if((addr = ip->addrs[NDIRECT]) == 0) 
+    {
       ip->addrs[NDIRECT] = addr = balloc(ip->dev);
-    bp = bread(ip->dev, addr);
-    a = (uint*)bp->data;
-    if((addr = a[bn]) == 0){
-      a[bn] = addr = balloc(ip->dev);
-      log_write(bp);
     }
-    brelse(bp);
+
+    diskBuffer = bread(ip->dev, addr);
+    diskData = (uint*)diskBuffer->data;
+
+    if((addr = diskData[logicalBlockNumber]) == 0)
+    {
+      diskData[logicalBlockNumber] = addr = balloc(ip->dev);
+      log_write(diskBuffer);
+    }
+
+    brelse(diskBuffer);
+    return addr;
+  }
+   // NOTE(Darrell): Keep logical block number delta starting from correct direct node
+  logicalBlockNumber -= NINDIRECT;
+
+  // NOTE(Darrell): Check double-indirect nodes
+  if(logicalBlockNumber < NINDIRECT2)
+  {
+    // Load indirect block, allocating if necessary.
+    if((addr = ip->addrs[NDIRECT+1]) == 0)
+    {
+      ip->addrs[NDIRECT+1] = addr = balloc(ip->dev);
+    }
+
+    // NOTE(Darrell): addr = Single-indrect block (allocate if needed)
+    diskBuffer = bread(ip->dev, addr);
+    diskData = (uint*)diskBuffer->data;
+    if((addr = diskData[logicalBlockNumber/NINDIRECT]) == 0)
+    {
+      diskData[logicalBlockNumber/NINDIRECT] = addr = balloc(ip->dev);
+      log_write(diskBuffer);
+    }
+    brelse(diskBuffer);
+
+    //NOTE(Darrell): addr = Double-Indirect block (allocate if needed)
+    diskBuffer = bread(ip->dev, addr);
+    diskData = (uint*)diskBuffer->data;
+    if((addr = diskData[logicalBlockNumber%NINDIRECT]) == 0)
+    {
+      diskData[logicalBlockNumber%NINDIRECT] = addr = balloc(ip->dev);
+      log_write(diskBuffer);
+    }
+    brelse(diskBuffer);
+
     return addr;
   }
 
