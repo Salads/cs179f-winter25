@@ -492,13 +492,12 @@ itrunc(struct inode *ip)
     {
       if(a[j])
       {
-        bfree(ip->dev, a[j]); // NOTE(Darrell): Free 1st-layer node
+        bfree(ip->dev, a[j]); // NOTE(Darrell): Free 2nd-layer node
       }
     }
 
     brelse(bp);
-    bfree(ip->dev, ip->addrs[NDIRECT+1]); // NOTE(Darrell): finally free 0-layer
-
+    bfree(ip->dev, ip->addrs[NDIRECT+1]); // NOTE(Darrell): finally free root for 2-layer
     ip->addrs[NDIRECT] = 0;
   }
 
