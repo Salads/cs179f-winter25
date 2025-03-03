@@ -492,18 +492,6 @@ itrunc(struct inode *ip)
     {
       if(a[j])
       {
-        // NOTE(Darrell): Clear 2nd-layer blocks
-        struct buf *buf2 = bread(ip->dev, ip->addrs[NDIRECT]);
-        uint *data2 = (uint*)bp->data;
-        for(int k = 0; k < NINDIRECT; ++k)
-        {
-          if(data2[k])
-          {
-            bfree(ip->dev, data2[k]);
-          }
-        }
-
-        brelse(buf2);
         bfree(ip->dev, a[j]); // NOTE(Darrell): Free 1st-layer node
       }
     }
